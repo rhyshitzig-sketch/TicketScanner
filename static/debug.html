@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Debug — Raw PDF Text</title>
+  <style>
+    body { font-family: monospace; padding: 24px; background: #f8f8f8; }
+    h2 { font-family: sans-serif; margin-bottom: 16px; }
+    input { margin-bottom: 12px; }
+    pre { background: #fff; border: 1px solid #ccc; padding: 12px; white-space: pre-wrap; margin-bottom: 24px; font-size: 0.82rem; line-height: 1.5; }
+    .page-label { font-family: sans-serif; font-weight: bold; margin-bottom: 4px; color: #1F4E79; }
+    .line-num { color: #aaa; user-select: none; display: inline-block; width: 3em; text-align: right; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h2>Raw pdfplumber text extraction</h2>
+  <input type="file" id="file-input" accept=".pdf" />
+  <div id="output"></div>
+  <script>
+    document.getElementById('file-input').addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const form = new FormData();
+      form.append('file', file);
+      const res   = await fetch('/debug-text', { method: 'POST', body: form });
+      const pages = await res.json();
+      const out   = document.getElementById('output');
+      out.innerHTML = '';
+      pages.forEach(p => {
+        const label = document.createElement('div');
+        label.className = 'page-label';
+        label.textContent = `── Page ${p.page} ──`;
+        const pre = document.createElement('pre');
+        pre.textContent = p.text.split('\n').map((l, i) =>
+          `${String(i + 1).padStart(3, ' ')}  ${l}`
+        ).join('\n');
+        out.appendChild(label);
+        out.appendChild(pre);
+      });
+    });
+  </script>
+</body>
+</html>

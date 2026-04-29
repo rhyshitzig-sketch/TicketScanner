@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto Ticket Filler</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1F4E79;
+      color: #fff;
+      padding: 18px 32px;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Upload zone ── */
+    #drop-zone {
+      border: 2px dashed #90b4d4;
+      border-radius: 10px;
+      background: #fff;
+      padding: 48px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #drop-zone.drag-over { background: #e8f0fb; border-color: #1F4E79; }
+    #drop-zone p { color: #4a5568; margin-bottom: 12px; font-size: 1rem; }
+    #drop-zone .hint { font-size: 0.82rem; color: #90a0b4; }
+
+    #file-input { display: none; }
+
+    .btn {
+      display: inline-block;
+      padding: 9px 22px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary   { background: #1F4E79; color: #fff; }
+    .btn-secondary { background: #e2e8f0; color: #2d3748; }
+    .btn-success   { background: #276749; color: #fff; }
+
+    /* ── File list ── */
+    #file-list { margin-top: 16px; font-size: 0.85rem; color: #4a5568; }
+    #file-list span { display: inline-block; background: #e8f0fb; border-radius: 4px; padding: 2px 8px; margin: 2px; }
+
+    /* ── Action bar ── */
+    #action-bar { margin-top: 20px; display: flex; gap: 12px; align-items: center; }
+
+    /* ── Status / errors ── */
+    #status { margin-top: 16px; font-size: 0.87rem; }
+    .error-box {
+      background: #fff5f5; border: 1px solid #feb2b2; border-radius: 6px;
+      padding: 10px 14px; margin-top: 8px; color: #c53030; font-size: 0.85rem;
+    }
+
+    /* ── Results section ── */
+    #results { margin-top: 32px; display: none; }
+    #results h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #2d3748; }
+
+    .table-wrap { overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      font-size: 0.83rem;
+    }
+
+    thead th {
+      background: #1F4E79;
+      color: #fff;
+      padding: 10px 12px;
+      text-align: left;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    thead th:first-child { border-radius: 8px 0 0 0; }
+    thead th:last-child  { border-radius: 0 8px 0 0; }
+
+    tbody tr:nth-child(even) { background: #f7fafc; }
+    tbody tr:hover { background: #ebf4ff; }
+
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+
+    td[contenteditable="true"] {
+      outline: none;
+      cursor: text;
+    }
+    td[contenteditable="true"]:focus {
+      background: #fffbcc;
+      box-shadow: inset 0 0 0 2px #d69e2e;
+    }
+
+    .col-source { color: #90a0b4; font-size: 0.78rem; }
+
+    #export-bar { margin-top: 20px; display: flex; gap: 12px; align-items: center; }
+    #row-count  { font-size: 0.85rem; color: #718096; }
+    #template-input, #event-location { font-size: 0.85rem; color: #4a5568; }
+    #event-location {
+      width: 180px;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<header>Auto Ticket Filler</header>
+
+<main>
+  <div id="drop-zone">
+    <p>Drop PDF tickets here, or <label for="file-input" style="color:#1F4E79;text-decoration:underline;cursor:pointer;">browse files</label></p>
+    <p class="hint">Supports Renfe &bull; Ryanair &bull; Vueling &bull; TAP Air Portugal &bull; Air Europa</p>
+    <input type="file" id="file-input" accept=".pdf" multiple />
+  </div>
+
+  <div id="file-list"></div>
+
+  <div id="action-bar">
+    <button class="btn btn-primary" id="parse-btn" disabled>Parse Tickets</button>
+    <button class="btn btn-secondary" id="clear-btn">Clear</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="results">
+    <h2>Extracted Data &mdash; click any cell to edit</h2>
+    <div class="table-wrap">
+      <table id="ticket-table">
+        <thead>
+          <tr>
+            <th>Last Name</th>
+            <th>First Name</th>
+            <th>Airline</th>
+            <th>Flight / Train No.</th>
+            <th>Confirmation No.</th>
+            <th>Ticket No.</th>
+            <th>Route</th>
+            <th>Dep. Date</th>
+            <th>Arr. Date</th>
+            <th>Dep. Time</th>
+            <th>Arr. Time</th>
+            <th class="col-source">Source File</th>
+          </tr>
+        </thead>
+        <tbody id="ticket-body"></tbody>
+      </table>
+    </div>
+    <div id="export-bar">
+      <button class="btn btn-success" id="export-btn">Download Excel</button>
+      <input type="text" id="event-location" value="LIS" placeholder="Event location" />
+      <input type="file" id="template-input" accept=".xlsx" title="Override Excel template" />
+      <span id="row-count"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+  const dropZone   = document.getElementById('drop-zone');
+  const fileInput  = document.getElementById('file-input');
+  const fileList   = document.getElementById('file-list');
+  const parseBtn   = document.getElementById('parse-btn');
+  const clearBtn   = document.getElementById('clear-btn');
+  const statusDiv  = document.getElementById('status');
+  const resultsDiv = document.getElementById('results');
+  const tbody      = document.getElementById('ticket-body');
+  const exportBtn  = document.getElementById('export-btn');
+  const eventLocation = document.getElementById('event-location');
+  const templateInput = document.getElementById('template-input');
+  const rowCount   = document.getElementById('row-count');
+
+  const FIELDS = [
+    'last_name', 'first_name', 'airline', 'flight_number',
+    'confirmation', 'ticket_number', 'route', 'date_departure', 'date_arrival',
+    'time_departure', 'time_arrival'
+  ];
+
+  let selectedFiles = [];
+
+  // ── Drag & drop ──
+  dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    addFiles([...e.dataTransfer.files]);
+  });
+  dropZone.addEventListener('click', e => { if (e.target.tagName !== 'LABEL') fileInput.click(); });
+  fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
+
+  function addFiles(newFiles) {
+    const pdfs = newFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    pdfs.forEach(f => { if (!selectedFiles.find(x => x.name === f.name)) selectedFiles.push(f); });
+    renderFileList();
+    parseBtn.disabled = selectedFiles.length === 0;
+  }
+
+  function renderFileList() {
+    fileList.innerHTML = selectedFiles.map(f => `<span>${f.name}</span>`).join('');
+  }
+
+  clearBtn.addEventListener('click', () => {
+    selectedFiles = [];
+    fileInput.value = '';
+    renderFileList();
+    parseBtn.disabled = true;
+    statusDiv.innerHTML = '';
+    resultsDiv.style.display = 'none';
+    tbody.innerHTML = '';
+  });
+
+  // ── Parse ──
+  parseBtn.addEventListener('click', async () => {
+    if (!selectedFiles.length) return;
+
+    parseBtn.disabled = true;
+    parseBtn.textContent = 'Parsing…';
+    statusDiv.innerHTML = '';
+    resultsDiv.style.display = 'none';
+
+    const form = new FormData();
+    selectedFiles.forEach(f => form.append('files', f));
+
+    try {
+      const res  = await fetch('/parse', { method: 'POST', body: form });
+      const data = await res.json();
+
+      renderTable(data.tickets);
+      renderErrors(data.errors);
+
+      if (data.tickets.length) {
+        resultsDiv.style.display = 'block';
+        rowCount.textContent = `${data.tickets.length} ticket(s) extracted`;
+      } else {
+        statusDiv.innerHTML += '<p style="color:#c53030;margin-top:8px;">No tickets could be parsed from the uploaded files.</p>';
+      }
+    } catch (err) {
+      statusDiv.innerHTML = `<div class="error-box">Request failed: ${err.message}</div>`;
+    } finally {
+      parseBtn.disabled = false;
+      parseBtn.textContent = 'Parse Tickets';
+    }
+  });
+
+  function renderTable(tickets) {
+    tbody.innerHTML = '';
+    tickets.forEach(t => {
+      const tr = document.createElement('tr');
+      FIELDS.forEach(key => {
+        const td = document.createElement('td');
+        td.contentEditable = 'true';
+        td.textContent = t[key] || '';
+        td.dataset.key = key;
+        tr.appendChild(td);
+      });
+      // Source file (read-only)
+      const src = document.createElement('td');
+      src.className = 'col-source';
+      src.textContent = t._source || '';
+      tr.appendChild(src);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderErrors(errors) {
+    if (!errors.length) return;
+    const html = errors.map(e =>
+      `<div class="error-box">${e.file} (page ${e.page ?? '?'}): ${e.error}</div>`
+    ).join('');
+    statusDiv.innerHTML += html;
+  }
+
+  // ── Export ──
+  exportBtn.addEventListener('click', async () => {
+    const tickets = collectTableData();
+    exportBtn.disabled = true;
+    exportBtn.textContent = 'Generating…';
+
+    try {
+      const template = templateInput.files[0];
+      const location = eventLocation.value.trim();
+      const options = template
+        ? (() => {
+            const form = new FormData();
+            form.append('tickets', JSON.stringify(tickets));
+            form.append('event_location', location);
+            form.append('template', template);
+            return { method: 'POST', body: form };
+          })()
+        : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickets, event_location: location }),
+          };
+
+      const res = await fetch('/export', options);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'tickets.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      statusDiv.innerHTML = `<div class="error-box">Export failed: ${err.message}</div>`;
+    } finally {
+      exportBtn.disabled = false;
+      exportBtn.textContent = 'Download Excel';
+    }
+  });
+
+  function collectTableData() {
+    return [...tbody.querySelectorAll('tr')].map(tr => {
+      const obj = {};
+      tr.querySelectorAll('td[data-key]').forEach(td => {
+        obj[td.dataset.key] = td.textContent.trim();
+      });
+      return obj;
+    });
+  }
+</script>
+</body>
+</html>
