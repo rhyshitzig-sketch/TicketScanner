@@ -1,16 +1,11 @@
 import io
 import json
-from pathlib import Path
 import pdfplumber
 from flask import Flask, request, jsonify, send_file
 from parsers.router import detect_and_parse, detect_and_parse_doc
 from excel_writer import write_excel
 
 app = Flask(__name__, static_folder='static', static_url_path='')
-
-DEFAULT_TEMPLATE_PATH = Path(
-    r'\\192.168.1.4\produccion\WOW 30 - LISBOA\VIAJES\CONTROL\CONTROL VIAJES WOW 30 - LISBOA.xlsx'
-)
 
 
 @app.route('/')
@@ -75,30 +70,19 @@ def debug_text():
 @app.route('/export', methods=['POST'])
 def export_excel():
     if request.content_type and request.content_type.startswith('multipart/form-data'):
-        tickets = request.form.get('tickets', '[]')
-        template = request.files.get('template')
+        tickets        = json.loads(request.form.get('tickets', '[]'))
         event_location = request.form.get('event_location', '')
-        tickets = json.loads(tickets)
-        output = write_excel(tickets, _export_template(template), event_location)
     else:
-        tickets = request.json.get('tickets', [])
+        tickets        = request.json.get('tickets', [])
         event_location = request.json.get('event_location', '')
-        output = write_excel(tickets, _export_template(), event_location=event_location)
 
+    output = write_excel(tickets, event_location)
     return send_file(
         output,
         as_attachment=True,
         download_name='tickets.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-
-
-def _export_template(uploaded_template=None):
-    if uploaded_template and uploaded_template.filename:
-        return uploaded_template
-    if DEFAULT_TEMPLATE_PATH.exists():
-        return DEFAULT_TEMPLATE_PATH
-    return None
 
 
 if __name__ == '__main__':

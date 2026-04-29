@@ -1,83 +1,46 @@
 import io
-import copy
 import re
+from datetime import datetime
+from collections import defaultdict
 from openpyxl import Workbook
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-
-COLUMNS = [
-    ('last_name',       'Last Name'),
-    ('first_name',      'First Name'),
-    ('airline',         'Airline'),
-    ('flight_number',   'Flight Number'),
-    ('confirmation',    'Confirmation Number'),
-    ('ticket_number',   'Ticket Number'),
-    ('route',           'Flight Route'),
-    ('date_departure',  'Date of Departure'),
-    ('date_arrival',    'Date of Arrival'),
-    ('time_departure',  'Time of Departure'),
-    ('time_arrival',    'Time of Arrival'),
-]
-
-HEADER_FONT  = Font(bold=True, color='FFFFFF')
-HEADER_FILL  = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
-HEADER_ALIGN = Alignment(horizontal='center', vertical='center')
-
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 MONTHS_ES = {
-    '01': 'ENERO',
-    '02': 'FEBRERO',
-    '03': 'MARZO',
-    '04': 'ABRIL',
-    '05': 'MAYO',
-    '06': 'JUNIO',
-    '07': 'JULIO',
-    '08': 'AGOSTO',
-    '09': 'SEPTIEMBRE',
-    '10': 'OCTUBRE',
-    '11': 'NOVIEMBRE',
-    '12': 'DICIEMBRE',
+    1: 'ENERO',   2: 'FEBRERO',    3: 'MARZO',      4: 'ABRIL',
+    5: 'MAYO',    6: 'JUNIO',      7: 'JULIO',       8: 'AGOSTO',
+    9: 'SEPTIEMBRE', 10: 'OCTUBRE', 11: 'NOVIEMBRE', 12: 'DICIEMBRE',
 }
 
-TEMPLATE_COLUMNS = {
-    'first_name': 'D',
-    'last_name': 'E',
-    'passport': 'F',
-    'airline': 'G',
-    'flight_number': 'H',
-    'confirmation': 'I',
-    'route': 'J',
-    'stopover': 'K',
-    'date_departure': 'L',
-    'date_arrival': 'M',
-    'time_departure': 'N',
-    'time_arrival': 'O',
-    'terminal': 'P',
+DAYS_ES = {
+    0: 'LUNES', 1: 'MARTES', 2: 'MIERCOLES', 3: 'JUEVES',
+    4: 'VIERNES', 5: 'SABADO', 6: 'DOMINGO',
 }
 
+COL_WIDTHS = {
+    'C': 13.2, 'D': 20.8, 'E': 24.3, 'F': 13.0,
+    'G': 13.5, 'H': 13.0, 'I': 13.0, 'J': 13.0,
+    'K': 13.0, 'L': 16.0, 'M': 16.5, 'N': 12.7,
+    'O': 14.3, 'P': 13.0, 'Q': 13.0, 'R': 13.0,
+}
 
-def write_excel(tickets, template=None, event_location=''):
-    if template:
-        return write_template_excel(tickets, template, event_location)
+MEDIUM = Side(style='medium')
+THIN   = Side(style='thin')
+NO     = Side(style=None)
 
+HEADER_FILL    = PatternFill('solid', fgColor='E7E6E6')
+SEPARATOR_FILL = PatternFill('solid', fgColor='0070C0')
+
+
+def write_excel(tickets, event_location=''):
     wb = Workbook()
-    ws = wb.active
-    ws.title = 'Tickets'
-    ws.row_dimensions[1].height = 20
+    wb.remove(wb.active)
 
-    for col_idx, (_, header) in enumerate(COLUMNS, 1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font  = HEADER_FONT
-        cell.fill  = HEADER_FILL
-        cell.alignment = HEADER_ALIGN
+    ida, regresos = [], []
+    for t in tickets:
+        (regresos if _is_regreso(t, event_location) else ida).append(t)
 
-    for row_idx, ticket in enumerate(tickets, 2):
-        for col_idx, (key, _) in enumerate(COLUMNS, 1):
-            ws.cell(row=row_idx, column=col_idx, value=ticket.get(key, ''))
-
-    for col in ws.columns:
-        max_len = max((len(str(cell.value or '')) for cell in col), default=10)
-        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+    _build_sheet(wb, 'IDA',      ida,      outbound=True)
+    _build_sheet(wb, 'Regresos', regresos, outbound=False)
 
     output = io.BytesIO()
     wb.save(output)
@@ -85,140 +48,199 @@ def write_excel(tickets, template=None, event_location=''):
     return output
 
 
-def write_template_excel(tickets, template, event_location=''):
-    wb = load_workbook(template)
-    ida_ws = wb['IDA'] if 'IDA' in wb.sheetnames else wb.active
-    regreso_ws = wb['Regresos'] if 'Regresos' in wb.sheetnames else ida_ws
+# ── Sheet builder ──────────────────────────────────────────────────────────────
 
-    by_sheet = {'IDA': [], 'Regresos': []}
-    for ticket in tickets:
-        sheet_name = _pick_template_sheet(ticket, event_location)
-        by_sheet[sheet_name].append(ticket)
+def _build_sheet(wb, name, tickets, outbound):
+    ws       = wb.create_sheet(name)
+    last_col = 'R' if outbound else 'Q'
 
-    if by_sheet['IDA']:
-        _append_template_rows(ida_ws, by_sheet['IDA'], max_col=18)
-    if by_sheet['Regresos']:
-        _append_template_rows(regreso_ws, by_sheet['Regresos'], max_col=17)
+    for col_letter, width in COL_WIDTHS.items():
+        ws.column_dimensions[col_letter].width = width
 
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
+    _write_title(ws, last_col)
+    _write_headers(ws, outbound, last_col)
 
-
-def _append_template_rows(ws, tickets, max_col):
-    row = _last_data_row(ws) + 1
-    style_row = _last_data_row(ws)
-
-    for ticket in tickets:
-        _copy_row_style(ws, style_row, row, max_col)
-        values = _template_values(ticket)
-        for key, col in TEMPLATE_COLUMNS.items():
-            ws[f'{col}{row}'] = values.get(key, '')
-        row += 1
+    cur_row = 4
+    groups  = _group_by_date(tickets)
+    for date_str, group in sorted(groups.items(), key=lambda x: _sort_key(x[0])):
+        _write_separator(ws, cur_row, date_str, last_col)
+        cur_row += 1
+        for idx, ticket in enumerate(group):
+            _write_data_row(ws, cur_row, ticket, idx == 0, idx == len(group) - 1, outbound)
+            ws.row_dimensions[cur_row].height = 18
+            cur_row += 1
 
 
-def _template_values(ticket):
+def _write_title(ws, last_col):
+    ws.merge_cells(f'C1:{last_col}2')
+    cell           = ws['C1']
+    cell.value     = 'WOW CONTROL VIAJES'
+    cell.font      = Font(bold=True, size=22, color='000000')
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[2].height = 28
+
+
+def _write_headers(ws, outbound, last_col):
+    labels = {
+        'C': 'PUESTO',    'D': 'NOMBRE',     'E': 'APELLIDOS',
+        'F': 'PASAPORTE', 'G': 'AEROLÍNEA',  'H': 'Nº VUELO',
+        'I': 'LOCALIZADOR',
+        'J': 'VUELO IDA' if outbound else 'VUELO REGRESO',
+        'K': 'ESCALA',    'L': 'FECHA SALIDA', 'M': 'FECHA LLEGADA',
+        'N': 'HORA SALIDA', 'O': 'HORA LLEGADA', 'P': 'TERMINAL',
+        'Q': 'EMITIDO' if outbound else 'CHECK IN?',
+        'R': 'CHECK IN?',
+    }
+    for col_letter in _col_range('C', last_col):
+        col_num        = _col_num(col_letter)
+        cell           = ws.cell(row=3, column=col_num)
+        cell.value     = labels.get(col_letter, '')
+        cell.font      = Font(bold=True, color='000000')
+        cell.fill      = HEADER_FILL
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border    = Border(
+            top=MEDIUM, bottom=MEDIUM,
+            left=MEDIUM if col_letter == 'C' else THIN,
+            right=MEDIUM if col_letter == last_col else THIN,
+        )
+    ws.row_dimensions[3].height = 18
+
+
+def _write_separator(ws, row, date_str, last_col):
+    ws.merge_cells(f'C{row}:{last_col}{row}')
+    cell           = ws[f'C{row}']
+    cell.value     = _date_section_header(date_str)
+    cell.font      = Font(bold=True, size=12, color='FFFFFF')
+    cell.fill      = SEPARATOR_FILL
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border    = Border(top=MEDIUM, bottom=MEDIUM, left=MEDIUM, right=MEDIUM)
+    ws.row_dimensions[row].height = 18
+
+
+def _write_data_row(ws, row, ticket, is_first, is_last, outbound):
+    vals = _format_ticket(ticket)
+    data = {
+        'D': vals['first_name'],   'E': vals['last_name'],
+        'G': vals['airline'],      'H': vals['flight_number'],
+        'I': vals['confirmation'], 'J': vals['route'],
+        'L': vals['date_departure'], 'M': vals['date_arrival'],
+        'N': vals['time_departure'], 'O': vals['time_arrival'],
+    }
+
+    top = MEDIUM if is_first else NO
+    bot = MEDIUM if is_last  else NO
+
+    for col_letter in _col_range('C', 'P'):
+        cell           = ws.cell(row=row, column=_col_num(col_letter))
+        cell.value     = data.get(col_letter, '')
+        cell.font      = Font(bold=(col_letter in ('M', 'O')), color='000000')
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border    = Border(
+            top=top, bottom=bot,
+            left=MEDIUM if col_letter == 'C' else NO,
+            right=MEDIUM if col_letter == 'P' else NO,
+        )
+
+    # Q and R are a separate check-in box (no top border, bottom only on last row)
+    ws.cell(row=row, column=_col_num('Q')).border = Border(
+        left=MEDIUM, right=NO, bottom=bot,
+    )
+    if outbound:
+        ws.cell(row=row, column=_col_num('R')).border = Border(
+            left=NO, right=MEDIUM, bottom=bot,
+        )
+
+
+# ── Formatting helpers ─────────────────────────────────────────────────────────
+
+def _format_ticket(t):
     return {
-        'first_name': ticket.get('first_name', '').strip().upper(),
-        'last_name': ticket.get('last_name', '').strip().upper(),
-        'passport': ticket.get('passport', ''),
-        'airline': _format_airline(ticket.get('airline', '')),
-        'flight_number': ticket.get('flight_number', '').strip().upper(),
-        'confirmation': ticket.get('confirmation', '').strip().upper(),
-        'route': _format_route(ticket.get('route', '')),
-        'stopover': ticket.get('stopover', ''),
-        'date_departure': _format_date(ticket.get('date_departure', '')),
-        'date_arrival': _format_date(ticket.get('date_arrival', '')),
-        'time_departure': _format_time(ticket.get('time_departure', '')),
-        'time_arrival': _format_time(ticket.get('time_arrival', '')),
-        'terminal': ticket.get('terminal', ''),
+        'first_name':     t.get('first_name',    '').strip().upper(),
+        'last_name':      t.get('last_name',     '').strip().upper(),
+        'airline':        _fmt_airline(t.get('airline', '')),
+        'flight_number':  t.get('flight_number', '').strip().upper(),
+        'confirmation':   t.get('confirmation',  '').strip().upper(),
+        'route':          _fmt_route(t.get('route', '')),
+        'date_departure': _fmt_date(t.get('date_departure', '')),
+        'date_arrival':   _fmt_date(t.get('date_arrival',   '')),
+        'time_departure': _fmt_time(t.get('time_departure', '')),
+        'time_arrival':   _fmt_time(t.get('time_arrival',   '')),
     }
 
 
-def _pick_template_sheet(ticket, event_location=''):
+def _fmt_airline(v):
+    v = v.strip().upper()
+    return {'AIR EUROPA': 'AIREUROPA'}.get(v, v)
+
+
+def _fmt_route(v):
+    return re.sub(r'\s*-\s*', '-', v.strip().upper())
+
+
+def _fmt_date(v):
+    v = v.strip()
+    m = re.match(r'^(\d{1,2})/(\d{1,2})/\d{4}$', v)
+    if not m:
+        return v.upper()
+    month = MONTHS_ES.get(int(m.group(2)), '')
+    return f'{int(m.group(1))} DE {month}' if month else v
+
+
+def _fmt_time(v):
+    v = v.strip()
+    m = re.match(r'^(\d{1,2}):(\d{2})$', v)
+    if not m:
+        return v.upper()
+    return f'{int(m.group(1)):02d}H{m.group(2)}'
+
+
+def _date_section_header(date_str):
+    try:
+        dt = datetime.strptime(date_str, '%d/%m/%Y')
+        return f'{DAYS_ES[dt.weekday()]} {dt.day} DE {MONTHS_ES[dt.month]}'
+    except ValueError:
+        return date_str.upper()
+
+
+# ── Route direction detection ──────────────────────────────────────────────────
+
+def _is_regreso(ticket, event_location=''):
     route = ticket.get('route', '').upper()
-    parts = [p.strip() for p in re.split(r'\s+-\s+|-', route) if p.strip()]
-    event_names = _event_location_names(event_location)
-    if len(parts) >= 2 and _looks_like_event_location(parts[0], event_names):
-        return 'Regresos'
-    if len(parts) >= 2 and _looks_like_event_location(parts[-1], event_names):
-        return 'IDA'
-    return 'IDA'
+    parts = [p.strip() for p in re.split(r'\s*-\s*', route) if p.strip()]
+    names = _event_names(event_location)
+    return bool(parts) and _matches(parts[0], names)
 
 
-def _event_location_names(event_location):
-    names = {part.strip().upper() for part in re.split(r'[,/;|]', event_location) if part.strip()}
-    if not names:
-        names = {'LIS', 'LISBOA', 'LISBON'}
-    return names
+def _event_names(event_location):
+    names = {p.strip().upper() for p in re.split(r'[,/;|]', event_location) if p.strip()}
+    return names or {'LIS', 'LISBOA', 'LISBON'}
 
 
-def _looks_like_event_location(value, event_names):
+def _matches(value, names):
     value = value.strip().upper()
-    return any(value == name or name in value for name in event_names)
+    return any(value == n or n in value for n in names)
 
 
-def _last_data_row(ws):
-    for row in range(ws.max_row, 1, -1):
-        values = [ws.cell(row=row, column=col).value for col in range(3, 16)]
-        if any(value not in (None, '') for value in values):
-            value_c = ws.cell(row=row, column=3).value
-            if value_c not in ('WOW CONTROL VIAJES',) and not _is_header_or_section(value_c):
-                return row
-    return 1
+# ── Utilities ──────────────────────────────────────────────────────────────────
+
+def _group_by_date(tickets):
+    groups = defaultdict(list)
+    for t in tickets:
+        groups[t.get('date_departure', '') or 'UNKNOWN'].append(t)
+    return groups
 
 
-def _is_header_or_section(value):
-    if not isinstance(value, str):
-        return False
-    value = value.strip().upper()
-    if value in {'PUESTO', 'PSM'}:
-        return True
-    return any(month in value for month in MONTHS_ES.values())
+def _sort_key(date_str):
+    try:
+        return datetime.strptime(date_str, '%d/%m/%Y')
+    except ValueError:
+        return datetime.max
 
 
-def _copy_row_style(ws, source_row, target_row, max_col):
-    ws.row_dimensions[target_row].height = ws.row_dimensions[source_row].height
-    for col in range(1, max_col + 1):
-        source = ws.cell(row=source_row, column=col)
-        target = ws.cell(row=target_row, column=col)
-        if source.has_style:
-            target._style = copy.copy(source._style)
-        if source.number_format:
-            target.number_format = source.number_format
-        if source.alignment:
-            target.alignment = copy.copy(source.alignment)
-        if source.protection:
-            target.protection = copy.copy(source.protection)
+def _col_range(start, end):
+    return [chr(c) for c in range(ord(start), ord(end) + 1)]
 
 
-def _format_airline(value):
-    value = value.strip().upper()
-    return {
-        'AIR EUROPA': 'AIREUROPA',
-        'RENFE': 'RENFE',
-    }.get(value, value)
-
-
-def _format_route(value):
-    value = value.strip().upper()
-    return re.sub(r'\s+-\s+', '-', value)
-
-
-def _format_date(value):
-    value = value.strip()
-    match = re.match(r'^(\d{1,2})/(\d{1,2})/\d{4}$', value)
-    if not match:
-        return value.upper()
-    day = int(match.group(1))
-    month = MONTHS_ES.get(f'{int(match.group(2)):02d}', '')
-    return f'{day} DE {month}' if month else value
-
-
-def _format_time(value):
-    value = value.strip()
-    match = re.match(r'^(\d{1,2}):(\d{2})$', value)
-    if not match:
-        return value.upper()
-    return f'{int(match.group(1)):02d}H{match.group(2)}'
+def _col_num(col_letter):
+    return ord(col_letter) - ord('A') + 1
