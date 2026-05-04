@@ -69,14 +69,18 @@ def debug_text():
 
 @app.route('/export', methods=['POST'])
 def export_excel():
+    template_bytes = None
     if request.content_type and request.content_type.startswith('multipart/form-data'):
         tickets        = json.loads(request.form.get('tickets', '[]'))
         event_location = request.form.get('event_location', '')
+        template_file  = request.files.get('template')
+        if template_file:
+            template_bytes = template_file.read()
     else:
         tickets        = request.json.get('tickets', [])
         event_location = request.json.get('event_location', '')
 
-    output = write_excel(tickets, event_location)
+    output = write_excel(tickets, event_location, template_bytes)
     return send_file(
         output,
         as_attachment=True,
