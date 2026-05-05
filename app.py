@@ -27,7 +27,7 @@ def parse_tickets():
 
             # Document-level parsers (e.g. Vueling) get all pages concatenated
             doc_results = detect_and_parse_doc(page_texts)
-            if doc_results is not None:
+            if doc_results:
                 for result in doc_results:
                     result['_source'] = f.filename
                     tickets.append(result)
