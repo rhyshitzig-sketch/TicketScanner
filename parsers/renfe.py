@@ -14,7 +14,9 @@ _BILLETE    = re.compile(r'Billete:\s*(\d+)')
 
 
 def detect(text):
-    return 'RENFE' in text.upper()
+    text_upper = text.upper()
+    # Match Renfe only if it doesn't have Iryo branding
+    return 'RENFE' in text_upper and 'IRYO' not in text_upper
 
 
 def parse(text):
