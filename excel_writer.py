@@ -2,6 +2,7 @@ import io
 import re
 from datetime import datetime
 from collections import defaultdict
+from itertools import groupby
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -18,13 +19,6 @@ DAYS_ES = {
     4: 'VIERNES', 5: 'SABADO', 6: 'DOMINGO',
 }
 _DAYS_ES_SET = set(DAYS_ES.values())
-
-COL_WIDTHS = {
-    'C': 13.2, 'D': 20.8, 'E': 24.3, 'F': 13.0,
-    'G': 13.5, 'H': 13.0, 'I': 13.0, 'J': 13.0,
-    'K': 13.0, 'L': 16.0, 'M': 16.5, 'N': 12.7,
-    'O': 14.3, 'P': 13.0, 'Q': 13.0, 'R': 13.0,
-}
 
 MEDIUM = Side(style='medium')
 THIN   = Side(style='thin')
@@ -70,6 +64,7 @@ def _insert_into_template(template_bytes, tickets, event_location):
             _write_title(ws, last_col)
             _write_headers(ws, outbound, last_col)
         _insert_tickets_into_sheet(wb[sheet_name], group, outbound)
+        _auto_fit_columns(wb[sheet_name])
 
     output = io.BytesIO()
     wb.save(output)
@@ -81,6 +76,8 @@ def _insert_tickets_into_sheet(ws, tickets, outbound):
     if not tickets:
         return
     last_col = 'R' if outbound else 'Q'
+
+    inserted_rows = set()
 
     # Sort ascending so each successive insert lands after the previous one
     for ticket in sorted(tickets, key=lambda t: (
@@ -94,24 +91,23 @@ def _insert_tickets_into_sheet(ws, tickets, outbound):
             insert_at = _find_new_group_position(ws, date_str)
             if insert_at <= ws.max_row:
                 _insert_rows_safe(ws, insert_at, 2)
+                inserted_rows = {r + 2 if r >= insert_at else r for r in inserted_rows}
             _write_separator(ws, insert_at, date_str, last_col)
             ws.row_dimensions[insert_at].height = 18
             _write_data_row(ws, insert_at + 1, ticket, True, True, outbound)
             ws.row_dimensions[insert_at + 1].height = 18
+            inserted_rows.add(insert_at + 1)
         else:
             end_row   = _find_group_end(ws, sep_row)
             insert_at = _find_time_position(ws, sep_row + 1, end_row, ticket.get('time_arrival', ''))
             _insert_rows_safe(ws, insert_at)
+            inserted_rows = {r + 1 if r >= insert_at else r for r in inserted_rows}
             ws.row_dimensions[insert_at].height = 18
             new_end  = _find_group_end(ws, sep_row)
-            is_first = insert_at == sep_row + 1
-            is_last  = insert_at == new_end
-            _write_data_row(ws, insert_at, ticket, is_first, is_last, outbound)
-            # Fix only the neighbouring row that changed role
-            if is_first and new_end >= insert_at + 1:
-                _set_row_data_borders(ws, insert_at + 1, False, insert_at + 1 == new_end, outbound)
-            if is_last and insert_at - 1 >= sep_row + 1:
-                _set_row_data_borders(ws, insert_at - 1, insert_at - 1 == sep_row + 1, False, outbound)
+            _write_data_row(ws, insert_at, ticket, insert_at == sep_row + 1, insert_at == new_end, outbound)
+            inserted_rows.add(insert_at)
+
+    _repair_flight_borders(ws, outbound, inserted_rows)
 
 
 # ── Template structure detection ───────────────────────────────────────────────
@@ -242,9 +238,6 @@ def _build_sheet(wb, name, tickets, outbound):
     ws       = wb.create_sheet(name)
     last_col = 'R' if outbound else 'Q'
 
-    for col_letter, width in COL_WIDTHS.items():
-        ws.column_dimensions[col_letter].width = width
-
     _write_title(ws, last_col)
     _write_headers(ws, outbound, last_col)
 
@@ -253,11 +246,17 @@ def _build_sheet(wb, name, tickets, outbound):
     for date_str, group in sorted(groups.items(), key=lambda x: _sort_key(x[0])):
         _write_separator(ws, cur_row, date_str, last_col)
         cur_row += 1
-        group_sorted = sorted(group, key=lambda t: _parse_time_for_sort(t.get('time_arrival', '')))
-        for idx, ticket in enumerate(group_sorted):
-            _write_data_row(ws, cur_row, ticket, idx == 0, idx == len(group_sorted) - 1, outbound)
-            ws.row_dimensions[cur_row].height = 18
-            cur_row += 1
+        group_sorted = sorted(group, key=lambda t: (
+            _parse_time_for_sort(t.get('time_arrival', '')), _flight_group_key(t)
+        ))
+        for _, sub_iter in groupby(group_sorted, key=_flight_group_key):
+            sub = list(sub_iter)
+            for idx, ticket in enumerate(sub):
+                _write_data_row(ws, cur_row, ticket, idx == 0, idx == len(sub) - 1, outbound)
+                ws.row_dimensions[cur_row].height = 18
+                cur_row += 1
+
+    _auto_fit_columns(ws)
 
 
 # ── Cell writers ───────────────────────────────────────────────────────────────
@@ -344,12 +343,17 @@ def _write_data_row(ws, row, ticket, is_first, is_last, outbound):
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
 
+_TRAIN_CARRIERS = {'IRYO', 'RENFE', 'CP'}
+
+
 def _format_ticket(t):
+    airline = _fmt_airline(t.get('airline', ''))
+    is_train = airline.upper() in _TRAIN_CARRIERS
     return {
         'first_name':     t.get('first_name',    '').strip().upper(),
         'last_name':      t.get('last_name',     '').strip().upper(),
-        'airline':        _fmt_airline(t.get('airline', '')),
-        'flight_number':  t.get('flight_number', '').strip().upper(),
+        'airline':        airline,
+        'flight_number':  '' if is_train else t.get('flight_number', '').strip().upper(),
         'confirmation':   t.get('confirmation',  '').strip().upper(),
         'route':          _fmt_route(t.get('route', '')),
         'date_departure': _fmt_date(t.get('date_departure', '')),
@@ -426,6 +430,65 @@ def _sort_key(date_str):
         return datetime.strptime(date_str, '%d/%m/%Y')
     except ValueError:
         return datetime.max
+
+
+def _flight_group_key(t):
+    return (t.get('flight_number', '').strip(), t.get('time_departure', '').strip())
+
+
+def _repair_flight_borders(ws, outbound, inserted_rows):
+    """Re-draw borders only for newly inserted rows, grouped into same-service boxes."""
+    if not inserted_rows:
+        return
+
+    # Split the inserted row numbers into contiguous runs
+    sorted_rows = sorted(inserted_rows)
+    runs = []
+    current_run = [sorted_rows[0]]
+    for row in sorted_rows[1:]:
+        if row == current_run[-1] + 1:
+            current_run.append(row)
+        else:
+            runs.append(current_run)
+            current_run = [row]
+    runs.append(current_run)
+
+    # Within each contiguous run, sub-group by (flight_number, departure_time) and box
+    for run in runs:
+        sub_groups = []
+        current = [run[0]]
+        for row in run[1:]:
+            h = str(ws.cell(row, _col_num('H')).value or '').strip()
+            n = str(ws.cell(row, _col_num('N')).value or '').strip()
+            ph = str(ws.cell(current[-1], _col_num('H')).value or '').strip()
+            pn = str(ws.cell(current[-1], _col_num('N')).value or '').strip()
+            if (h, n) == (ph, pn) and (h or n):
+                current.append(row)
+            else:
+                sub_groups.append(current)
+                current = [row]
+        sub_groups.append(current)
+        for sg in sub_groups:
+            for idx, row in enumerate(sg):
+                _set_row_data_borders(ws, row, idx == 0, idx == len(sg) - 1, outbound)
+
+
+def _auto_fit_columns(ws):
+    wide_merges = {
+        (rng.min_row, rng.min_col)
+        for rng in ws.merged_cells.ranges
+        if rng.max_col > rng.min_col
+    }
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if (cell.row, cell.column) in wide_merges:
+                continue
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        if max_len > 0:
+            ws.column_dimensions[col_letter].width = max_len + 4
 
 
 def _col_range(start, end):
