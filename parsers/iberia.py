@@ -3,7 +3,7 @@ from datetime import date as _date
 
 # Per-page: each boarding card page is one ticket for one passenger.
 
-SIGNALS = [r'Tarjeta de embarque', r'CÓDIGO DE RESERVA']
+SIGNALS = [r'\bIB\d{3,5}\b', r'iberia', r'CÓDIGO DE RESERVA']
 
 _MONTHS_ES = {
     'ene': '01', 'feb': '02', 'mar': '03', 'abr': '04',

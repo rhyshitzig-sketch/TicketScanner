@@ -70,10 +70,21 @@ Name format: `FIRSTINITIAL.LASTNAME.` (e.g. `R.HITZIG-S.`, `M.SANTAMAR.`) — Re
 Currently each PDF page is treated as one ticket. The Omio-bundled Renfe PDF has 4 pages = 4 tickets. This is intentional and handles both single-ticket files and multi-page bundles.
 
 ## Supported carriers
-| Carrier      | Status    | Notes                        |
-|--------------|-----------|------------------------------|
-| Renfe        | Complete  | via Omio or direct           |
-| Ryanair      | TODO      | need sample PDF              |
-| Vueling      | TODO      | need sample PDF              |
-| TAP Air      | TODO      | need sample PDF              |
-| Air Europa   | TODO      | need sample PDF              |
+| Carrier          | File          | Notes                                         |
+|------------------|---------------|-----------------------------------------------|
+| Renfe            | renfe.py      | via Omio or direct; abbreviated names         |
+| Ryanair          | ryanair.py    |                                               |
+| Vueling          | vueling.py    | DOCUMENT_LEVEL; Spanish full-month dates      |
+| CP (Portuguese)  | cp.py         |                                               |
+| Iberia           | iberia.py     | per-page boarding pass                        |
+| Volotea          | volotea.py    |                                               |
+| KLM              | klm.py        | DOCUMENT_LEVEL                                |
+| Iryo             | iryo.py       |                                               |
+| easyJet          | easyjet.py    | per-page; Spanish abbreviated months; EJU#### |
+| LATAM            | latam.py      | DOCUMENT_LEVEL; two flights per page; SALIDA/LLEGADA lines include date |
+| CDV              | cdv.py        |                                               |
+
+## Signal hygiene — lessons learned
+- Signals must be carrier-specific. `Tarjeta de embarque` (boarding pass in Spanish) matched both Iberia and easyJet — too generic, removed from Iberia.
+- `RESERVA CONFIRMADA` matched both Vueling and LATAM — removed from Vueling; `VY\d{4}` and `Código de reserva` are sufficient.
+- When a new parser isn't being reached, check whether an earlier parser in the PARSERS list has an overly broad signal that matches first.

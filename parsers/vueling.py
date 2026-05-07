@@ -8,7 +8,6 @@ DOCUMENT_LEVEL = True
 SIGNALS = [
     r'\bVY\d{4}\b',           # Vueling flight numbers (VY8460, etc.)
     r'C[oó]digo de reserva',  # booking ref label
-    r'RESERVA\s+CONFIRMADA',  # confirmation header
 ]
 
 _MONTHS = {

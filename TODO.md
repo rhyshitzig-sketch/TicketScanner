@@ -3,8 +3,6 @@
 ## Carriers to add
 Each carrier needs a sample PDF run through debug.html first to map the real pdfplumber layout.
 
-- [ ] Ryanair — need sample PDF
-- [ ] Vueling — need sample PDF
 - [ ] TAP Air Portugal — need sample PDF
 - [ ] Air Europa — need sample PDF
 
@@ -22,6 +20,9 @@ Each carrier needs a sample PDF run through debug.html first to map the real pdf
 
 ## Done
 - [x] Renfe parser (outbound + return, multi-page bundles)
+- [x] Ryanair, Vueling, CP, Iberia, Volotea, KLM, Iryo parsers
+- [x] easyJet parser (per-page boarding pass, Spanish)
+- [x] LATAM parser (document-level, two flights per page, cross-midnight arrivals)
 - [x] Editable results table with per-cell editing before export
 - [x] Excel export with styled header row
 - [x] Debug tool at `/debug.html` for mapping new carrier layouts

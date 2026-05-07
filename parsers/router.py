@@ -1,8 +1,8 @@
 import re
-from . import renfe, cdv, vueling, ryanair, cp, iberia, volotea, klm, iryo
+from . import renfe, cdv, vueling, ryanair, cp, iberia, volotea, klm, iryo, easyjet, latam
 
 # Order matters if layouts overlap — more-specific formats first
-PARSERS = [cdv, vueling, ryanair, cp, iberia, volotea, klm, iryo, renfe]
+PARSERS = [cdv, vueling, ryanair, cp, iberia, volotea, klm, iryo, easyjet, latam, renfe]
 
 
 def _matches(parser, text):
